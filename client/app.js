@@ -5,20 +5,23 @@ let mediaRecorder;
 let socket;
 let audioChunks = [];
 
+let message = '';
+
 startButton.addEventListener("click", async () => {
   socket = new WebSocket("ws://localhost:8080");
 
-  // サーバからメッセージを受信したときの処理
+  // when message received from server
   socket.onmessage = (event) => {
     const result = JSON.parse(event.data);
-    console.log("Received message from server:", result); // 受信したメッセージをコンソールに出力
-    transcriptDiv.innerHTML = result.text + "<br>";
+    console.log("Received message from server:", result); // output received message to console
+    message = message + result.text + "<br>"
+    transcriptDiv.innerHTML = message;
   };
 
   socket.onopen = async () => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     mediaRecorder = new MediaRecorder(stream);
-    mediaRecorder.start(250); // 250msごとにデータを送信
+    mediaRecorder.start(2000);
 
     mediaRecorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
@@ -30,8 +33,9 @@ startButton.addEventListener("click", async () => {
         const reader = new FileReader();
         reader.onload = () => {
           const arrayBuffer = reader.result;
+          console.log('send data to server.')
           socket.send(arrayBuffer);
-          audioChunks = []; // バッファをクリア
+          audioChunks = []; // clear buffer
         };
         reader.readAsArrayBuffer(audioBlob);
       }

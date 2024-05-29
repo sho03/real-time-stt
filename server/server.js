@@ -1,14 +1,16 @@
 const WebSocket = require("ws");
-const { SpeechClient } = require("@google-cloud/speech");
-// require('dotenv').config();
+const speech = require("@google-cloud/speech")
 
 const wss = new WebSocket.Server({ port: 8080 });
 
-const client = new SpeechClient();
+const client = new speech.SpeechClient();
+
+// const encoding = 'LINEAR16';
+const encoding = 'WEBM_OPUS';
 
 const request = {
   config: {
-    encoding: "WEBM_OPUS",
+    encoding: encoding,
     sampleRateHertz: 16000,
     languageCode: "ja-JP",
   },
@@ -17,62 +19,88 @@ const request = {
 
 let recognizeStream = null;
 let timeoutId = null;
+const streamingLimit = 20000;
 
-// コネクション確立時
 wss.on("connection", (ws) => {
-  const sendWsClient = (data) => {
+  console.log('web socket connection established');
+
+  function startStream() {
+    console.log('start stream')
+    clearTimeout(timeoutId);
+
+    recognizeStream = client
+      .streamingRecognize(request)
+      .on('data', sendWsClient)
+      .on('end', () => { console.log('stream ended.') })
+      .on('error', err => {
+        if (err.code === 11) {
+          restartStream();
+        } else {
+          console.error('API request error ' + err);
+        }
+      })
+    // Restart stream when streamingLimit expires
+    timeoutId = setTimeout(restartStream, streamingLimit);
+    console.log('recognizeStream: ', recognizeStream);
+  }
+  startStream();
+
+  function restartStream() {
+    console.log('Restarting stream')
+    if (recognizeStream) {
+      console.log('Stopping stream')
+      recognizeStream.end();
+      recognizeStream.removeListener("data", sendWsClient);
+      recognizeStream = null;
+    }
+    startStream();
+  }
+
+  function sendWsClient(data) {
+    console.log('Processing data from Google Speech API.')
+    console.log(data);
     const text =
       data.results[0] && data.results[0].alternatives[0]
         ? data.results[0].alternatives[0].transcript
         : "";
     console.log("text: ", text);
     console.log(data.results[0])
-    ws.send(
-      JSON.stringify({
-        text: text,
-      }),
-    );
+    if (data.results[0].isFinal) {
+      ws.send(
+        JSON.stringify({
+          text: text,
+        }),
+      );
+    }
   };
 
-  const startStream = () => {
-    console.log("startStream");
-    if (recognizeStream) {
-      recognizeStream.end();
-      recognizeStream.removeListener("data", sendWsClient);
-      recognizeStream = null;
-    }
-
-    recognizeStream = client
-      .streamingRecognize(request)
-      .on("error", (err) => {
-        console.error(err);
-        console.log('error: ', err.code);
-        ws.close();
-      })
-      .on("data", sendWsClient);
-
-    // 1分ごとにストリームを再接続
-    timeoutId = setTimeout(startStream, 55000); // 55秒で再接続
-  };
-
-  startStream();
-  // クライアントからのメッセージ受信時
-  ws.on("message", (message) => {
-    if (recognizeStream.writable) {
-      try {
-        recognizeStream.write(message);
-        console.log("write successed.");
-      } catch (e) {
-        console.log("write missed.");
-      }
-    }
-  });
-  // コネクションクローズ
-  ws.on("close", () => {
-    console.log("close");
+  function close() {
+    console.log("WebSocket connection closed.");
     clearTimeout(timeoutId);
     if (recognizeStream) {
       recognizeStream.end();
+      recognizeStream.removeListener('data', sendWsClient);
+      recognizeStream = null
     }
-  });
+  }
+
+  function receiveMessage(message) {
+    console.log('Received message from client');
+    if (recognizeStream.writable) {
+      try {
+        recognizeStream.write(message);
+        console.log('Message written to stream');
+      } catch (e) {
+        console.log("Failed to write to stream: ", e);
+      }
+    } else {
+      console.log('recognizeStream is not writable.')
+    }
+  }
+  ws.on("message", receiveMessage);
+  ws.on("close", close);
+
+  // test
+  setInterval(() => ws.send(JSON.stringify({text: "test text"})), 3000);
 });
+
