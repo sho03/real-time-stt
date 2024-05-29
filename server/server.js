@@ -1,9 +1,9 @@
-const WebSocket = require("ws");
-const speech = require("@google-cloud/speech")
+import { WebSocketServer }from 'ws';
+import { SpeechClient } from '@google-cloud/speech';
 
-const wss = new WebSocket.Server({ port: 8080 });
+const wss = new WebSocketServer({ port: 8080 });
 
-const client = new speech.SpeechClient();
+const client = new SpeechClient();
 
 // const encoding = 'LINEAR16';
 const encoding = 'WEBM_OPUS';
